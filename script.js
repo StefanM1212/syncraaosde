@@ -68,18 +68,28 @@ const moreObs = new IntersectionObserver((entries) => {
 }, { threshold: 0.2 });
 moreFeats.forEach(c => moreObs.observe(c));
 
-/* ── Feature Tabs (with lazy video loading) ── */
+/* ── Feature Tabs (with lazy video loading + Vorladen) ── */
+
+// Quelle zuweisen + im Hintergrund puffern, OHNE abzuspielen.
+// So liegt das Video beim Tab-Klick schon (teilweise) im Cache → fühlt sich instant an.
+function preloadLazyVideo(panel) {
+  const v = panel && panel.querySelector('video[data-lazy-video]');
+  if (!v || v.dataset.loaded) return;
+  v.querySelectorAll('source[data-src]').forEach(s => { s.src = s.dataset.src; });
+  v.preload = 'auto';
+  v.load();
+  v.dataset.loaded = '1';
+}
+
 function activateLazyVideo(panel) {
   const v = panel.querySelector('video[data-lazy-video]');
   if (!v) return;
-  if (!v.dataset.loaded) {
-    v.querySelectorAll('source[data-src]').forEach(s => {
-      s.src = s.dataset.src;
-    });
-    v.load();
-    v.dataset.loaded = '1';
-  }
+  preloadLazyVideo(panel);   // falls noch nicht geschehen
   v.play().catch(() => {});
+}
+
+function panelFor(idx) {
+  return document.querySelector(`.feat-panel[data-panel="${idx}"]`);
 }
 
 function pauseAllPanelVideos(except) {
@@ -89,18 +99,43 @@ function pauseAllPanelVideos(except) {
 }
 
 document.querySelectorAll('.feat-tab').forEach(tab => {
+  // Bei Hover / Fokus / Touch schon mit dem Laden anfangen,
+  // bevor überhaupt geklickt wird.
+  const warm = () => preloadLazyVideo(panelFor(tab.dataset.tab));
+  tab.addEventListener('mouseenter', warm, { passive: true });
+  tab.addEventListener('focus', warm);
+  tab.addEventListener('touchstart', warm, { passive: true });
+
   tab.addEventListener('click', () => {
     const idx = tab.dataset.tab;
     document.querySelectorAll('.feat-tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.feat-panel').forEach(p => p.classList.remove('active'));
     tab.classList.add('active');
-    const panel = document.querySelector(`.feat-panel[data-panel="${idx}"]`);
+    const panel = panelFor(idx);
     panel.classList.add('active');
     const newVideo = panel.querySelector('video');
     pauseAllPanelVideos(newVideo);
     activateLazyVideo(panel);
   });
 });
+
+// Sobald der Feature-Bereich in den Viewport scrollt, alle Tab-Videos
+// im Leerlauf gestaffelt vorladen — kleinste zuerst, damit die Leitung
+// nicht von den großen (WhatsApp/E-Mail) blockiert wird.
+(function preloadOnView() {
+  const section = document.getElementById('features');
+  if (!section) return;
+  const idle = window.requestIdleCallback || (cb => setTimeout(cb, 1));
+  const order = ['2', '4', '3', '5', '0', '1']; // klein → groß
+  const obs = new IntersectionObserver(([e]) => {
+    if (!e.isIntersecting) return;
+    obs.disconnect();
+    order.forEach((idx, i) => {
+      setTimeout(() => idle(() => preloadLazyVideo(panelFor(idx))), i * 600);
+    });
+  }, { threshold: 0.1 });
+  obs.observe(section);
+})();
 
 /* ── VSL Hero Video (YouTube — lädt erst beim Klick) ── */
 const vslFrame = document.getElementById('vslFrame');
